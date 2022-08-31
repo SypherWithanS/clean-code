@@ -15,21 +15,24 @@ def map_reduce_task(request, ids):
     else:
         for register in registers:
             if ids:  # Using optimized queries:
-                objects = register.objects.filter(id__in=ids).values_list("id", flat=True)
+                objects = register.objects.filter(
+                    id__in=ids).values_list("id", flat=True)
             else:
                 objects = register.objects.all().values_list("id", flat=True)
 
             t = 0
             task_map = []
 
-            def chunks(objects, length):  # Defining method with a generator in a loop.
+            # Defining method with a generator in a loop.
+            def chunks(objects, length):
                 for i in xrange(0, len(objects), length):
                     yield objects[i:i+length]
 
             for chunk in chunks(objects, 20):
                 countdown = 5*t
                 t += 1
-                tasks_map.append(request_by_mapper(register, chunk, countdown, datetime.now()))
+                tasks_map.append(request_by_mapper(
+                    register, chunk, countdown, datetime.now()))
         g = group(*tasks_map)
         reduce_task = chain(g, create_request_by_reduce_async.s(tasks_map))()
 
@@ -57,7 +60,7 @@ def create_payment(request):
                 'currency1': 'BTC',
                 'currency2': currency,
                 'buyer_email':
-                    request.user.email,  # TODO set request.user.mail,
+                    request.user.email,
                 'item_name': 'Policy for ' + policy.exchange.name,
                 'item_number': policy.id
             }
@@ -88,10 +91,13 @@ def create_payment(request):
                         currency=currency)
 
                     try:
-                        default_email = os.environ.get('DJANGO_EMAIL_DEFAULT_EMAIL')
+                        default_email = os.environ.get(
+                            'DJANGO_EMAIL_DEFAULT_EMAIL')
                         subject = "Website: You’re one step away from being secured"
-                        message = render_to_string('first_email.html', {'user': policy.user, 'payment': payment})
-                        send_mail(subject, message, default_email, [policy.user.email])
+                        message = render_to_string(
+                            'first_email.html', {'user': policy.user, 'payment': payment})
+                        send_mail(subject, message, default_email,
+                                  [policy.user.email])
                     except Exception as e:
                         logger.error('Error on sending first email: ', e)
 
@@ -149,7 +155,7 @@ def create_payment(request):
                     'currency1': 'BTC',
                     'currency2': currency,
                     'buyer_email':
-                        request.user.email,  # TODO set request.user.mail,
+                        request.user.email,
                     'item_name': 'Policy for ' + policy.exchange.name,
                     'item_number': policy.id
                 }
@@ -180,13 +186,15 @@ def create_payment(request):
                     policy.save()
 
                     try:
-                        default_email = os.environ.get('DJANGO_EMAIL_DEFAULT_EMAIL')
+                        default_email = os.environ.get(
+                            'DJANGO_EMAIL_DEFAULT_EMAIL')
                         subject = "Website: You’re one step away from being secured"
-                        message = render_to_string('first_email.html', {'user': policy.user, 'payment': payment})
-                        send_mail(subject, message, default_email, [policy.user.email])
+                        message = render_to_string(
+                            'first_email.html', {'user': policy.user, 'payment': payment})
+                        send_mail(subject, message, default_email,
+                                  [policy.user.email])
                     except Exception:
                         logger.error('Error on sending first email')
-
 
                 except Exception as e:
                     message = "Error contacting with the Gateway"
@@ -258,7 +266,7 @@ def create_payment(request):
             response = JsonResponse(post_params)
             return response
 
-        
+
 @staff_member_required
 def backup_to_csv(request):
     data = {}
@@ -356,6 +364,7 @@ def backup_to_csv(request):
         except Exception:
             return response
 
+
 @csrf_protect
 @login_required
 def dashboard(request):
@@ -371,8 +380,9 @@ def dashboard(request):
             "Partner: %s logged into system" % (userPartner))
         return account(request)
     except ObjectDoesNotExist:
-        # handle case for regular user
-        pass
+        logger.info(
+            "partner: %s not exists" % (userPartner)
+        )
 
     insurancy_policy_info = Policy.objects.order_by('-id').filter(
         user=user.id).exclude(status=PolicyStatus.DELETED)
@@ -492,7 +502,7 @@ def dashboard(request):
         policy_number_tag = "Crypto"
         try:
             context_policy_number = policy_number_tag + \
-                                    str((policy_numbers[current_id])['id'])
+                str((policy_numbers[current_id])['id'])
         except (IndexError, KeyError) as error:
             logger.error(
                 "An error has occured while trying to get policy number.\
@@ -664,12 +674,9 @@ def dashboard(request):
         }
         user_limit_information_context.append(user_limit_information)
         logger.debug(contextPolicy)
-    # user_limit_information_context = set(user_limit_information_context)
     context = {
         'USER_LIMIT_INFO': user_limit_information_context,
         'POLICIES': contextPolicy,
-        # ToDo:
-        # Check if user already referral partern
         'is_referral': False
     }
     return render(request, 'website/dashboard/dashboard.html', context)
