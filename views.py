@@ -7,6 +7,96 @@ def create_w(request, id):
         return HttpResponseRedirect("/")
 
 
+def GatewayException():
+    GatewayException()
+
+
+def ExceptionMessage(e, message):
+    message = "Error contacting with the Gateway"
+    response = JsonResponse({
+        'status': 'false',
+        'message': message
+    })
+    response.status_code = 418
+    logger.error(e)
+    return response
+
+
+def createResponse(decimal, transaction, policy, currency):
+    post_params = {
+        "payment_amount":
+            decimal.Decimal(transaction.amount).quantize(
+                decimal.Decimal('0.00000001'),
+                rounding=decimal.ROUND_DOWN).normalize(),
+        "payment_address":
+            transaction.address,
+        "payment_qr":
+            transaction.qrcode_url,
+        "gateway_status":
+            transaction.status_url,
+        "policy_cover":
+            policy.cover,
+        "exchange_name":
+            policy.exchange.name,
+        "date_of_formating":
+            policy.request_date.date(),
+        "currency":
+            currency
+    }
+
+    response = JsonResponse(post_params)
+    return response
+
+
+def tryRefactored(datetime, transaction, currency):
+    payment = UserPayments(
+        status=0,
+        update_date=datetime.datetime.now(),
+        amount=transaction.amount,
+        address=transaction.address,
+        payment=transaction.txn_id,
+        confirms_needed=transaction.confirms_needed,
+        timeout=transaction.timeout,
+        status_url=transaction.status_url,
+        qrcode_url=transaction.qrcode_url,
+        currency=currency)
+
+    return payment
+
+
+def tryDefaultEmail():
+    try:
+        default_email = os.environ.get(
+            'DJANGO_EMAIL_DEFAULT_EMAIL')
+        subject = "Website: You’re one step away from being secured"
+        message = render_to_string(
+            'first_email.html', {'user': policy.user, 'payment': payment})
+        send_mail(subject, message, default_email,
+                  [policy.user.email])
+    except Exception as e:
+        logger.error('Error on sending first email: ', e)
+
+
+def postParamsTry(policy, request, currency):
+    post_params = {
+        'amount': policy.fee,
+        'currency1': 'BTC',
+        'currency2': currency,
+        'buyer_email':
+            request.user.email,
+        'item_name': 'Policy for ' + policy.exchange.name,
+        'item_number': policy.id
+    }
+    try:
+        client = CryptoPayments(public_key, private_key)
+        transaction = client.createTransaction(post_params)
+        logger.debug(transaction)  # FOR DEBUG
+        if len(transaction) == 0:
+            raise Exception
+    except Exception as e:
+        return GatewayException()
+
+
 def map_reduce_task(request, ids):
     registers = get_registers(request)
     ids = get_ids(ids)
@@ -55,51 +145,13 @@ def create_payment(request):
         except Exception as e:
             # everything is ok, new user
             # create payment with coinpayment
-            post_params = {
-                'amount': policy.fee,
-                'currency1': 'BTC',
-                'currency2': currency,
-                'buyer_email':
-                    request.user.email,
-                'item_name': 'Policy for ' + policy.exchange.name,
-                'item_number': policy.id
-            }
-            try:
-                client = CryptoPayments(public_key, private_key)
-                transaction = client.createTransaction(post_params)
-                logger.debug(transaction)  # FOR DEBUG
-                if len(transaction) == 0:
-                    raise Exception
-            except Exception as e:
-                logger.error(e)
-                message = 'Payment gateway is down'
-                responseData = {'error': True, 'message': message}
-                return JsonResponse(responseData)
+            postParamsTry(policy, request, currency)
 
             try:
                 try:
-                    payment = UserPayments(
-                        status=0,
-                        update_date=datetime.datetime.now(),
-                        amount=transaction.amount,
-                        address=transaction.address,
-                        payment=transaction.txn_id,
-                        confirms_needed=transaction.confirms_needed,
-                        timeout=transaction.timeout,
-                        status_url=transaction.status_url,
-                        qrcode_url=transaction.qrcode_url,
-                        currency=currency)
+                    tryRefactored(datetime, transaction, currency)
 
-                    try:
-                        default_email = os.environ.get(
-                            'DJANGO_EMAIL_DEFAULT_EMAIL')
-                        subject = "Website: You’re one step away from being secured"
-                        message = render_to_string(
-                            'first_email.html', {'user': policy.user, 'payment': payment})
-                        send_mail(subject, message, default_email,
-                                  [policy.user.email])
-                    except Exception as e:
-                        logger.error('Error on sending first email: ', e)
+                    tryDefaultEmail()
 
                 except Exception as e:
                     logger.error(e)
@@ -114,128 +166,27 @@ def create_payment(request):
                     policy.save()
 
             except Exception as e:
-                message = "Error contacting with the Gateway"
-                response = JsonResponse({
-                    'status': 'false',
-                    'message': message
-                })
-                response.status_code = 418
-                logger.error(e)
-                return response
+                return ExceptionMessage(e, "Error contacting with the Gateway")
             else:
-                post_params = {
-                    "payment_amount":
-                        decimal.Decimal(transaction.amount).quantize(
-                            decimal.Decimal('0.00000001'),
-                            rounding=decimal.ROUND_DOWN).normalize(),
-                    "payment_address":
-                        transaction.address,
-                    "payment_qr":
-                        transaction.qrcode_url,
-                    "gateway_status":
-                        transaction.status_url,
-                    "policy_cover":
-                        policy.cover,
-                    "exchange_name":
-                        policy.exchange.name,
-                    "date_of_formating":
-                        policy.request_date.date(),
-                    "currency":
-                        currency
-                }
-
-                response = JsonResponse(post_params)
-                return response
+                return createResponse(decimal, transaction, policy, currency)
         else:
             # payment already exist
             if payment.status == PaymentStatus.ERROR:
                 logger.info('status Error, should create new')
-                post_params = {
-                    'amount': policy.fee,
-                    'currency1': 'BTC',
-                    'currency2': currency,
-                    'buyer_email':
-                        request.user.email,
-                    'item_name': 'Policy for ' + policy.exchange.name,
-                    'item_number': policy.id
-                }
+                postParamsTry(policy, request, currency)
 
                 try:
-                    client = CryptoPayments(public_key, private_key)
-                    transaction = client.createTransaction(post_params)
-                except Exception as e:
-                    logger.error(e)
-                    message = 'Payment gateway is down'
-                    responseData = {'error': True, 'message': message}
-                    return JsonResponse(responseData)
-
-                try:
-                    payment = UserPayments(
-                        status=0,
-                        update_date=datetime.datetime.now(),
-                        amount=transaction.amount,
-                        address=transaction.address,
-                        payment=transaction.txn_id,
-                        confirms_needed=transaction.confirms_needed,
-                        timeout=transaction.timeout,
-                        status_url=transaction.status_url,
-                        qrcode_url=transaction.qrcode_url,
-                        currency=currency)
+                    tryRefactored(datetime, transaction, currency)
                     payment.save()
                     policy.payment_id = payment
                     policy.save()
 
-                    try:
-                        default_email = os.environ.get(
-                            'DJANGO_EMAIL_DEFAULT_EMAIL')
-                        subject = "Website: You’re one step away from being secured"
-                        message = render_to_string(
-                            'first_email.html', {'user': policy.user, 'payment': payment})
-                        send_mail(subject, message, default_email,
-                                  [policy.user.email])
-                    except Exception:
-                        logger.error('Error on sending first email')
+                    tryDefaultEmail()
 
                 except Exception as e:
-                    message = "Error contacting with the Gateway"
-                    response = JsonResponse({
-                        'status': 'false',
-                        'message': message
-                    })
-                    response.status_code = 418
-                    logger.error(e)
-                    return response
+                    return ExceptionMessage(e, "Error contacting with the Gateway")
                 else:
-                    post_params = {
-                        "payment_amount":
-                            decimal.Decimal(transaction.amount).quantize(
-                                decimal.Decimal('0.00000001'),
-                                rounding=decimal.ROUND_DOWN).normalize(),
-                        "payment_address":
-                            transaction.address,
-                        "payment_qr":
-                            transaction.qrcode_url,
-                        "gateway_status":
-                            transaction.status_url,
-                        "policy_cover":
-                            policy.cover,
-                        "exchange_name":
-                            policy.exchange.name,
-                        "date_of_formating":
-                            policy.request_date.date(),
-                        "currency":
-                            currency
-                    }
-
-                    response = JsonResponse(post_params)
-                    return response
-
-                    message = "Payment Exist"
-                    response = JsonResponse({
-                        'status': 'false',
-                        'message': message
-                    })
-                    return response
+                    return createResponse(decimal, transaction, policy, currency)
             elif payment.status == PaymentStatus.PENDING:
                 logger.info('status Pending, do nothing')
                 transaction = policy.payment_id
